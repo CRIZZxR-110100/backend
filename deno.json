@@ -1,0 +1,6 @@
+{
+  "allowScripts": {
+    "allow": ["npm:@firebase/util@1.15.0", "npm:bcrypt@6.0.0", "npm:protobufjs@7.5.5"],
+    "deny": []
+  }
+}
