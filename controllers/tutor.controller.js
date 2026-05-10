@@ -85,19 +85,29 @@ const getDashboardStats = async (req, res) => {
       { name: 'Vencidas', value: overdue, color: 'hsl(0, 84%, 60%)' }
     ];
 
-    // Consolidado total de materias para el desglose tabular
+    // Consolidado total de materias para el desglose visual y tabular
     const allSubjects = Object.keys(subjectStats).map(subject => ({
       name: subject,
       totalStudents: subjectStats[subject].total,
-      failRate: Math.round((subjectStats[subject].failed / subjectStats[subject].total) * 100) || 0
+      failRate: Math.round((subjectStats[subject].failed / subjectStats[subject].total) * 100) || 0,
+      averageGrade: parseFloat((subjectStats[subject].sumGrade / subjectStats[subject].total).toFixed(1)) || 0
     })).sort((a, b) => b.failRate - a.failRate);
+
+    // Datos simulados para evolución (en un sistema real se calcularía por fechas)
+    const performanceEvolution = [
+      { name: 'Parcial 1', promedio: 7.5 },
+      { name: 'Parcial 2', promedio: 8.2 },
+      { name: 'Parcial 3', promedio: (totalGrades > 0 ? (totalGrades - failedGrades) / totalGrades * 10 : 7.8).toFixed(1) }
+    ];
 
     res.json({
       totalStudents,
       studentsAtRisk,
       globalFailRate: totalGrades > 0 ? Math.round((failedGrades / totalGrades) * 100) : 0,
       taskDistribution,
-      allSubjects
+      allSubjects,
+      performanceEvolution,
+      complianceRate: allTasks.length > 0 ? Math.round((completed / allTasks.length) * 100) : 0
     });
   } catch (error) {
     console.error('Error al obtener stats:', error);

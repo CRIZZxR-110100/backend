@@ -1,7 +1,6 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:@supabase/supabase-js@^2.105.4": "2.105.4",
     "npm:bcrypt@6": "6.0.0",
     "npm:cors@^2.8.6": "2.8.6",
     "npm:dotenv@^17.4.2": "17.4.2",
@@ -1460,7 +1459,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
-        "npm:@supabase/supabase-js@^2.105.4",
+        "npm:@supabase/supabase-js@^2.49.1",
         "npm:bcrypt@6",
         "npm:cors@^2.8.6",
         "npm:dotenv@^17.4.2",

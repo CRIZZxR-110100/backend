@@ -261,6 +261,34 @@ const DB = {
     const { data, error } = await supabase.from('messages').select('*').eq('student_id', studentId);
     if (error) throw error;
     return data.map(m => ({ ...m, tutorId: m.tutor_id, studentId: m.student_id, createdAt: m.created_at }));
+  },
+
+  // METODOS GLOBALES PARA TUTORES
+  async getAllSubjects() {
+    if (useMock) {
+      return Array.from(mockData.subjects.values());
+    }
+    const { data, error } = await supabase.from('subjects').select('*');
+    if (error) throw error;
+    return data.map(s => ({ ...s, studentId: s.student_id, totalPartials: s.total_partials, createdAt: s.created_at }));
+  },
+
+  async getAllPartialGrades() {
+    if (useMock) {
+      return Array.from(mockData.partialGrades.values());
+    }
+    const { data, error } = await supabase.from('partial_grades').select('*');
+    if (error) throw error;
+    return data.map(pg => ({ ...pg, subjectId: pg.subject_id, partialName: pg.partial_name, createdAt: pg.created_at }));
+  },
+
+  async getAllTasks() {
+    if (useMock) {
+      return Array.from(mockData.tasks.values());
+    }
+    const { data, error } = await supabase.from('tasks').select('*');
+    if (error) throw error;
+    return data.map(t => ({ ...t, subjectId: t.subject_id, studentId: t.student_id, dueDate: t.due_date, createdAt: t.created_at }));
   }
 };
 
