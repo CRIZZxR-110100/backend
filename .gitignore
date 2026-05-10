@@ -22,6 +22,7 @@ dist/
 # Firebase
 firebase-adminsdk*.json
 serviceAccountKey.json
+*.sql
 
 # OS
 .DS_Store
