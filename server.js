@@ -20,13 +20,8 @@ app.use('/api/grades', gradesRoutes);
 app.use('/api/tutor', tutorRoutes);
 app.use('/api/academic', academicRoutes);
 
-app.set('trust proxy', 1); // Confiar en el proxy de Vercel
-
 app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    environment: process.env.USE_MOCK_DB === 'true' ? 'mock' : 'supabase' 
-  });
+  res.status(200).json({ status: 'ok', environment: process.env.USE_MOCK_DB === 'true' ? 'mock' : 'firestore' });
 });
 
 // Manejo de errores global
@@ -36,14 +31,6 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-
-// Exportar la app para Vercel
-module.exports = app;
-
-// Solo iniciar el servidor si se ejecuta directamente (no como función serverless)
-if (require.main === module || process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
-  });
-}
-
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
+});
