@@ -20,7 +20,7 @@ const getSynthesizedGrades = async () => {
       id: sub.id,
       studentId: sub.studentId,
       subject: sub.name,
-      grade: sumGrade, 
+      grade: sumGrade, // La nota de la materia ES la sumatoria de las secuencias
       status,
       totalPartials: sub.totalPartials
     };
@@ -40,22 +40,20 @@ const getDashboardStats = async (req, res) => {
     let studentsAtRisk = 0;
     
     // Calcular estadísticas
-    const subjectStats = {};
     let totalGrades = 0;
     let failedGrades = 0;
+    
+    const failuresPerStudent = {};
+    students.forEach(s => failuresPerStudent[s.id] = 0);
 
     allGrades.forEach(grade => {
       totalGrades++;
-      if (grade.status === 'reprobada') failedGrades++;
-      
-      if (!subjectStats[grade.subject]) {
-        subjectStats[grade.subject] = { total: 0, failed: 0, sumGrade: 0 };
-      }
-      subjectStats[grade.subject].total++;
       if (grade.status === 'reprobada') {
-        subjectStats[grade.subject].failed++;
+        failedGrades++;
+        if (failuresPerStudent[grade.studentId] !== undefined) {
+          failuresPerStudent[grade.studentId]++;
+        }
       }
-      subjectStats[grade.subject].sumGrade += parseFloat(grade.grade) || 0;
     });
 
     // Identificar alumnos en riesgo (con al menos 1 materia reprobada en total)
@@ -85,19 +83,56 @@ const getDashboardStats = async (req, res) => {
       { name: 'Vencidas', value: overdue, color: 'hsl(0, 84%, 60%)' }
     ];
 
-    // Consolidado total de materias para el desglose visual y tabular
-    const allSubjects = Object.keys(subjectStats).map(subject => ({
-      name: subject,
-      totalStudents: subjectStats[subject].total,
-      failRate: Math.round((subjectStats[subject].failed / subjectStats[subject].total) * 100) || 0,
-      averageGrade: parseFloat((subjectStats[subject].sumGrade / subjectStats[subject].total).toFixed(1)) || 0
-    })).sort((a, b) => b.failRate - a.failRate);
+    // Distribución de Materias Reprobadas (0, 1, 2, 3+)
+    const failCounts = { '0': 0, '1': 0, '2': 0, '3+': 0 };
+    Object.values(failuresPerStudent).forEach(count => {
+      if (count === 0) failCounts['0']++;
+      else if (count === 1) failCounts['1']++;
+      else if (count === 2) failCounts['2']++;
+      else failCounts['3+']++;
+    });
 
-    // Datos simulados para evolución (en un sistema real se calcularía por fechas)
-    const performanceEvolution = [
-      { name: 'Parcial 1', promedio: 7.5 },
-      { name: 'Parcial 2', promedio: 8.2 },
-      { name: 'Parcial 3', promedio: (totalGrades > 0 ? (totalGrades - failedGrades) / totalGrades * 10 : 7.8).toFixed(1) }
+    const failedSubjectsDistribution = [
+      { name: '0 Reprobadas', value: failCounts['0'], color: 'hsl(142, 71%, 45%)' },
+      { name: '1 Reprobada', value: failCounts['1'], color: 'hsl(45, 100%, 50%)' },
+      { name: '2 Reprobadas', value: failCounts['2'], color: 'hsl(25, 95%, 53%)' },
+      { name: '3+ Reprobadas', value: failCounts['3+'], color: 'hsl(0, 84%, 60%)' }
+    ];
+
+    // Calcular evolución de rendimiento basado en promedios reales por cada bloque de parcial
+    const allPartialGrades = await DB.getAllPartialGrades();
+    const partialStats = {};
+    allPartialGrades.forEach(pg => {
+      if (pg.grade !== null && pg.grade !== undefined) {
+        const name = pg.partialName || 'Desconocido';
+        if (!partialStats[name]) partialStats[name] = { sum: 0, count: 0 };
+        partialStats[name].sum += parseFloat(pg.grade);
+        partialStats[name].count++;
+      }
+    });
+
+    const performanceEvolution = Object.keys(partialStats)
+      .sort() // "Parcial 1", "Parcial 2", etc.
+      .map(name => ({
+        name,
+        promedio: parseFloat((partialStats[name].sum / partialStats[name].count).toFixed(1))
+      }));
+
+    // Calcular distribución de calificaciones
+    let gradesDist = { excellent: 0, good: 0, regular: 0, deficient: 0 };
+    allGrades.forEach(g => {
+      const score = parseFloat(g.grade) || 0;
+      if (score >= 90) gradesDist.excellent++;
+      else if (score >= 80) gradesDist.good++;
+      else if (score >= 70) gradesDist.regular++;
+      else gradesDist.deficient++;
+    });
+
+    const gradeDistribution = [
+      { name: 'Excelente (90-100)', value: gradesDist.excellent, color: 'hsl(142, 71%, 45%)' },
+      { name: 'Bueno (80-89)', value: gradesDist.good, color: 'hsl(200, 100%, 50%)' },
+      { name: 'Regular (70-79)', value: gradesDist.regular, color: 'hsl(45, 100%, 50%)' },
+      { name: 'Deficiente (<70)', value: gradesDist.deficient, color: 'hsl(0, 84%, 60%)' }
     ];
 
     res.json({
@@ -105,8 +140,9 @@ const getDashboardStats = async (req, res) => {
       studentsAtRisk,
       globalFailRate: totalGrades > 0 ? Math.round((failedGrades / totalGrades) * 100) : 0,
       taskDistribution,
-      allSubjects,
+      failedSubjectsDistribution,
       performanceEvolution,
+      gradeDistribution,
       complianceRate: allTasks.length > 0 ? Math.round((completed / allTasks.length) * 100) : 0
     });
   } catch (error) {
@@ -123,14 +159,22 @@ const getStudentsList = async (req, res) => {
 
     const students = await DB.getAllStudents();
     const allGrades = await getSynthesizedGrades();
+    const allTasks = await DB.getAllTasks();
 
-    // Adjuntar estado de trayectoria y promedio a cada alumno
+    // Adjuntar estado de trayectoria, promedio, tareas y materias a cada alumno
     const enrichedStudents = students.map(student => {
       const studentGrades = allGrades.filter(g => g.studentId === student.id);
+      const studentTasks = allTasks.filter(t => t.studentId === student.id);
       
       let failed = 0;
       let approvedCount = 0;
       let enCursoCount = 0;
+
+      const subjectsDetail = studentGrades.map(g => ({
+        subject: g.subject,
+        grade: g.grade,
+        status: g.status
+      }));
 
       studentGrades.forEach(g => {
         if (g.status === 'aprobada') {
@@ -159,6 +203,20 @@ const getStudentsList = async (req, res) => {
          academicStatus = 'Normal';
       }
 
+      const now = new Date();
+      let completedTasks = 0;
+      let pendingTasks = 0;
+      let overdueTasks = 0;
+
+      studentTasks.forEach(t => {
+        if (t.status === 'completed') completedTasks++;
+        else {
+          const tDate = new Date(t.dueDate);
+          if (tDate >= now) pendingTasks++;
+          else overdueTasks++;
+        }
+      });
+
       return {
         id: student.id,
         name: student.name,
@@ -168,7 +226,13 @@ const getStudentsList = async (req, res) => {
         activeSubjects,
         average,
         hasCriticalAlert: failed > 0,
-        academicStatus
+        academicStatus,
+        subjectsDetail,
+        taskStats: {
+          completed: completedTasks,
+          pending: pendingTasks,
+          overdue: overdueTasks
+        }
       };
     });
 

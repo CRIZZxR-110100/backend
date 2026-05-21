@@ -93,12 +93,21 @@ const addPartialGrade = async (req, res) => {
     if (!subjectId || !partialName || grade === undefined) {
       return res.status(400).json({ error: 'Materia, nombre de parcial y calificación son requeridos.' });
     }
-    const newPartial = await DB.createPartialGrade({
-      subjectId,
-      partialName,
-      grade: parseFloat(grade)
-    });
-    res.status(201).json(newPartial);
+
+    const existingPartials = await DB.getPartialGradesBySubject(subjectId);
+    const existing = existingPartials.find(p => p.partialName === partialName);
+
+    if (existing) {
+      const updatedPartial = await DB.updatePartialGrade(existing.id, { grade: parseFloat(grade) });
+      return res.status(200).json(updatedPartial);
+    } else {
+      const newPartial = await DB.createPartialGrade({
+        subjectId,
+        partialName,
+        grade: parseFloat(grade)
+      });
+      return res.status(201).json(newPartial);
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al agregar calificación parcial' });
