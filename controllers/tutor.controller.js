@@ -33,7 +33,8 @@ const getDashboardStats = async (req, res) => {
       return res.status(403).json({ error: 'Acceso denegado. Se requiere rol de tutor.' });
     }
 
-    const students = await DB.getAllStudents();
+    let students = await DB.getAllStudents();
+    students = students.filter(s => s.tutorId === req.user.id && s.status === 'active');
     const allGrades = await getSynthesizedGrades();
 
     let totalStudents = students.length;
@@ -157,7 +158,8 @@ const getStudentsList = async (req, res) => {
       return res.status(403).json({ error: 'Acceso denegado.' });
     }
 
-    const students = await DB.getAllStudents();
+    let students = await DB.getAllStudents();
+    students = students.filter(s => s.tutorId === req.user.id && s.status === 'active');
     const allGrades = await getSynthesizedGrades();
     const allTasks = await DB.getAllTasks();
 
@@ -243,6 +245,8 @@ const getStudentsList = async (req, res) => {
   }
 };
 
+const { sendPushNotification } = require('../utils/push');
+
 const sendMessage = async (req, res) => {
   try {
     if (req.user.role !== 'tutor') {
@@ -255,6 +259,17 @@ const sendMessage = async (req, res) => {
     }
 
     const newMsg = await DB.sendMessage(req.user.id, studentId, content);
+
+    // Enviar Push Notification al alumno
+    const sub = await DB.getPushSubscriptionByUserId(studentId);
+    if (sub) {
+      await sendPushNotification(sub, {
+        title: 'Nuevo Mensaje de tu Tutor',
+        body: content,
+        url: '/'
+      });
+    }
+
     res.status(201).json({ message: 'Mensaje enviado', data: newMsg });
   } catch (error) {
     console.error('Error al enviar mensaje:', error);
@@ -262,4 +277,55 @@ const sendMessage = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardStats, getStudentsList, sendMessage };
+const getPendingStudents = async (req, res) => {
+  try {
+    if (req.user.role !== 'tutor') {
+      return res.status(403).json({ error: 'Acceso denegado.' });
+    }
+    const pending = await DB.getPendingStudents(req.user.id);
+    res.json(pending);
+  } catch (error) {
+    console.error('Error al obtener alumnos pendientes:', error);
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+const approveStudent = async (req, res) => {
+  try {
+    if (req.user.role !== 'tutor') return res.status(403).json({ error: 'Acceso denegado.' });
+    const { id } = req.params;
+    
+    // Verificar que el estudiante pertenece a este tutor
+    const student = await DB.getUserById(id);
+    if (!student || student.tutorId !== req.user.id) {
+      return res.status(404).json({ error: 'Alumno no encontrado.' });
+    }
+
+    const updated = await DB.updateUser(id, { status: 'active' });
+    res.json({ message: 'Alumno aprobado', student: updated });
+  } catch (error) {
+    console.error('Error al aprobar alumno:', error);
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+const rejectStudent = async (req, res) => {
+  try {
+    if (req.user.role !== 'tutor') return res.status(403).json({ error: 'Acceso denegado.' });
+    const { id } = req.params;
+    
+    const student = await DB.getUserById(id);
+    if (!student || student.tutorId !== req.user.id) {
+      return res.status(404).json({ error: 'Alumno no encontrado.' });
+    }
+
+    // Cambiar a 'baja'
+    const updated = await DB.updateUser(id, { status: 'baja' });
+    res.json({ message: 'Alumno rechazado', student: updated });
+  } catch (error) {
+    console.error('Error al rechazar alumno:', error);
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+module.exports = { getDashboardStats, getStudentsList, sendMessage, getPendingStudents, approveStudent, rejectStudent };

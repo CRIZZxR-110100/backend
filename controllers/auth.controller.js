@@ -34,7 +34,9 @@ const login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        status: user.status
+        status: user.status,
+        invitationCode: user.invitationCode,
+        tutorId: user.tutorId
       }
     });
 
@@ -58,11 +60,17 @@ const register = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    let invitationCode = null;
+    if (role === 'tutor') {
+      invitationCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    }
+
     const newUser = await DB.createUser({
       name,
       email,
       password: hashedPassword,
-      role: role || 'student'
+      role: role || 'student',
+      invitationCode
     });
 
     const token = jwt.sign(
@@ -79,7 +87,9 @@ const register = async (req, res) => {
         name: newUser.name,
         email: newUser.email,
         role: newUser.role,
-        status: newUser.status
+        status: newUser.status,
+        invitationCode: newUser.invitationCode,
+        tutorId: newUser.tutorId
       }
     });
   } catch (error) {

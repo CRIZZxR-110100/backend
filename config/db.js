@@ -17,7 +17,7 @@ const DB = {
     if (useMock) return mockData.users.get(id) || null;
     const { data, error } = await supabase.from('users').select('*').eq('id', id).single();
     if (error) return null;
-    return { ...data, tutorId: data.tutor_id, createdAt: data.created_at };
+    return { ...data, tutorId: data.tutor_id, invitationCode: data.invitation_code, createdAt: data.created_at };
   },
 
   async getUserByEmail(email) {
@@ -29,7 +29,7 @@ const DB = {
     }
     const { data, error } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
     if (error || !data) return null;
-    return { ...data, tutorId: data.tutor_id, createdAt: data.created_at };
+    return { ...data, tutorId: data.tutor_id, invitationCode: data.invitation_code, createdAt: data.created_at };
   },
 
   async createUser(user) {
@@ -39,7 +39,8 @@ const DB = {
       password: user.password,
       role: user.role || 'student',
       tutor_id: user.tutorId || null,
-      status: user.status || 'active'
+      status: user.status || 'active',
+      invitation_code: user.invitationCode || null
     };
     if (useMock) {
       const id = Date.now().toString();
@@ -49,7 +50,7 @@ const DB = {
     }
     const { data, error } = await supabase.from('users').insert([newUser]).select().single();
     if (error) throw error;
-    return { ...data, tutorId: data.tutor_id, createdAt: data.created_at };
+    return { ...data, tutorId: data.tutor_id, invitationCode: data.invitation_code, createdAt: data.created_at };
   },
 
   async updateUser(id, data) {
@@ -59,6 +60,7 @@ const DB = {
     if (data.role) updateData.role = data.role;
     if (data.status) updateData.status = data.status;
     if (data.tutorId !== undefined) updateData.tutor_id = data.tutorId;
+    if (data.invitationCode !== undefined) updateData.invitation_code = data.invitationCode;
 
     if (useMock) {
       const user = mockData.users.get(id);
@@ -69,7 +71,7 @@ const DB = {
     }
     const { data: updated, error } = await supabase.from('users').update(updateData).eq('id', id).select().single();
     if (error) throw error;
-    return { ...updated, tutorId: updated.tutor_id, createdAt: updated.created_at };
+    return { ...updated, tutorId: updated.tutor_id, invitationCode: updated.invitation_code, createdAt: updated.created_at };
   },
 
   async getAllStudents() {
@@ -78,7 +80,28 @@ const DB = {
     }
     const { data, error } = await supabase.from('users').select('*').eq('role', 'student');
     if (error) throw error;
-    return data.map(u => ({ ...u, tutorId: u.tutor_id, createdAt: u.created_at }));
+    return data.map(u => ({ ...u, tutorId: u.tutor_id, invitationCode: u.invitation_code, createdAt: u.created_at }));
+  },
+
+  async getTutorByInvitationCode(code) {
+    if (useMock) {
+      for (const user of mockData.users.values()) {
+        if (user.role === 'tutor' && user.invitationCode === code) return user;
+      }
+      return null;
+    }
+    const { data, error } = await supabase.from('users').select('*').eq('role', 'tutor').eq('invitation_code', code).maybeSingle();
+    if (error || !data) return null;
+    return { ...data, tutorId: data.tutor_id, invitationCode: data.invitation_code, createdAt: data.created_at };
+  },
+
+  async getPendingStudents(tutorId) {
+    if (useMock) {
+      return Array.from(mockData.users.values()).filter(u => u.role === 'student' && u.tutorId === tutorId && u.status === 'pending');
+    }
+    const { data, error } = await supabase.from('users').select('*').eq('role', 'student').eq('tutor_id', tutorId).eq('status', 'pending');
+    if (error) throw error;
+    return data.map(u => ({ ...u, tutorId: u.tutor_id, invitationCode: u.invitation_code, createdAt: u.created_at }));
   },
 
   // GRADES (Histórico)
@@ -189,6 +212,32 @@ const DB = {
     return data.map(pg => ({ ...pg, subjectId: pg.subject_id, partialName: pg.partial_name, createdAt: pg.created_at }));
   },
 
+  async updatePartialGrade(id, data) {
+    const updateData = {};
+    if (data.grade !== undefined) updateData.grade = data.grade;
+
+    if (useMock) {
+      const pg = mockData.partialGrades.get(id);
+      if (!pg) throw new Error("Secuencia no encontrada");
+      const updated = { ...pg, ...data };
+      mockData.partialGrades.set(id, updated);
+      return updated;
+    }
+    const { data: updated, error } = await supabase.from('partial_grades').update(updateData).eq('id', id).select().single();
+    if (error) throw error;
+    return { ...updated, subjectId: updated.subject_id, partialName: updated.partial_name, createdAt: updated.created_at };
+  },
+
+  async deletePartialGrade(id) {
+    if (useMock) {
+      mockData.partialGrades.delete(id);
+      return { success: true };
+    }
+    const { error } = await supabase.from('partial_grades').delete().eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  },
+
   // TAREAS
   async createTask(taskData) {
     const newTask = {
@@ -289,6 +338,26 @@ const DB = {
     const { data, error } = await supabase.from('tasks').select('*');
     if (error) throw error;
     return data.map(t => ({ ...t, subjectId: t.subject_id, studentId: t.student_id, dueDate: t.due_date, createdAt: t.created_at }));
+  },
+
+  // NOTIFICACIONES PUSH
+  async savePushSubscription(userId, subscription) {
+    if (useMock) return;
+    // Buscamos si ya existe una suscripción para este endpoint o actualizamos
+    const { data, error } = await supabase.from('push_subscriptions').upsert({
+      user_id: userId,
+      endpoint: subscription.endpoint,
+      keys: subscription.keys
+    }, { onConflict: 'endpoint' }); 
+    if (error) throw error;
+    return data;
+  },
+
+  async getPushSubscriptionByUserId(userId) {
+    if (useMock) return null;
+    const { data, error } = await supabase.from('push_subscriptions').select('*').eq('user_id', userId).single();
+    if (error && error.code !== 'PGRST116') throw error;
+    return data;
   }
 };
 
