@@ -35,7 +35,13 @@ const getDashboardStats = async (req, res) => {
 
     let students = await DB.getAllStudents();
     students = students.filter(s => s.tutorId === req.user.id && s.status === 'active');
+
+    // Crear un set de IDs de estudiantes del tutor para filtrar rápidamente
+    const tutorStudentIds = new Set(students.map(s => s.id));
+
     const allGrades = await getSynthesizedGrades();
+    // Filtramos solo las calificaciones de las materias que pertenezcan a los alumnos de ESTE tutor
+    const tutorGrades = allGrades.filter(g => tutorStudentIds.has(g.studentId));
 
     let totalStudents = students.length;
     let studentsAtRisk = 0;
@@ -47,7 +53,7 @@ const getDashboardStats = async (req, res) => {
     const failuresPerStudent = {};
     students.forEach(s => failuresPerStudent[s.id] = 0);
 
-    allGrades.forEach(grade => {
+    tutorGrades.forEach(grade => {
       totalGrades++;
       if (grade.status === 'reprobada') {
         failedGrades++;
@@ -59,20 +65,24 @@ const getDashboardStats = async (req, res) => {
 
     // Identificar alumnos en riesgo (con al menos 1 materia reprobada en total)
     const failedStudents = new Set();
-    allGrades.filter(g => g.status === 'reprobada').forEach(g => failedStudents.add(g.studentId));
+    tutorGrades.filter(g => g.status === 'reprobada').forEach(g => failedStudents.add(g.studentId));
     studentsAtRisk = failedStudents.size;
 
     // Computar Tareas
     const allTasks = await DB.getAllTasks();
+    const tutorTasks = allTasks.filter(t => tutorStudentIds.has(t.studentId));
+    
     let completed = 0;
     let pending = 0;
     let overdue = 0;
     const now = new Date();
 
-    allTasks.forEach(task => {
+    tutorTasks.forEach(task => {
       if (task.status === 'completed') completed++;
       else {
-        const taskDate = new Date(task.dueDate);
+        // due_date es tipo DATE en Supabase (sin hora). Se interpreta como fin del día
+        // para evitar que tareas del día actual aparezcan como "vencidas" por zona horaria.
+        const taskDate = new Date(task.dueDate + 'T23:59:59Z');
         if (taskDate >= now) pending++;
         else overdue++;
       }
@@ -100,10 +110,13 @@ const getDashboardStats = async (req, res) => {
       { name: '3+ Reprobadas', value: failCounts['3+'], color: 'hsl(0, 84%, 60%)' }
     ];
 
-    // Calcular evolución de rendimiento basado en promedios reales por cada bloque de parcial
+    // Calcular evolución de rendimiento basado en promedios reales por cada bloque de parcial (solo materias del tutor)
+    const tutorSubjectIds = new Set(tutorGrades.map(g => g.id));
     const allPartialGrades = await DB.getAllPartialGrades();
+    const tutorPartialGrades = allPartialGrades.filter(pg => tutorSubjectIds.has(pg.subjectId));
+    
     const partialStats = {};
-    allPartialGrades.forEach(pg => {
+    tutorPartialGrades.forEach(pg => {
       if (pg.grade !== null && pg.grade !== undefined) {
         const name = pg.partialName || 'Desconocido';
         if (!partialStats[name]) partialStats[name] = { sum: 0, count: 0 };
@@ -119,22 +132,62 @@ const getDashboardStats = async (req, res) => {
         promedio: parseFloat((partialStats[name].sum / partialStats[name].count).toFixed(1))
       }));
 
-    // Calcular distribución de calificaciones
+    // Distribución de promedios POR ALUMNO (mismo cálculo que muestra la tabla de alumnos)
+    // sumGrade de cada materia / número de materias = promedio del alumno
     let gradesDist = { excellent: 0, good: 0, regular: 0, deficient: 0 };
-    allGrades.forEach(g => {
-      const score = parseFloat(g.grade) || 0;
-      if (score >= 90) gradesDist.excellent++;
-      else if (score >= 80) gradesDist.good++;
-      else if (score >= 70) gradesDist.regular++;
+    students.forEach(s => {
+      const studentSubjects = tutorGrades.filter(g => g.studentId === s.id);
+      if (studentSubjects.length === 0) return;
+      const sum = studentSubjects.reduce((acc, g) => acc + parseFloat(g.grade || 0), 0);
+      const avg = sum / studentSubjects.length;
+      if (avg >= 90) gradesDist.excellent++;
+      else if (avg >= 80) gradesDist.good++;
+      else if (avg >= 70) gradesDist.regular++;
       else gradesDist.deficient++;
     });
 
     const gradeDistribution = [
       { name: 'Excelente (90-100)', value: gradesDist.excellent, color: 'hsl(142, 71%, 45%)' },
-      { name: 'Bueno (80-89)', value: gradesDist.good, color: 'hsl(200, 100%, 50%)' },
-      { name: 'Regular (70-79)', value: gradesDist.regular, color: 'hsl(45, 100%, 50%)' },
-      { name: 'Deficiente (<70)', value: gradesDist.deficient, color: 'hsl(0, 84%, 60%)' }
+      { name: 'Bueno (80-89)',      value: gradesDist.good,      color: 'hsl(200, 100%, 50%)' },
+      { name: 'Regular (70-79)',    value: gradesDist.regular,   color: 'hsl(45, 100%, 50%)' },
+      { name: 'Deficiente (<70)',   value: gradesDist.deficient, color: 'hsl(0, 84%, 60%)' }
     ];
+
+    // Distribución de niveles de riesgo académico (calculado a partir del estado de cada alumno en getStudentsList)
+    // Lo derivamos aquí directamente desde los datos ya disponibles
+    const riskCounts = { 'Normal': 0, 'En Curso': 0, 'Riesgo Alto': 0 };
+    students.forEach(s => {
+      const studentGrades = tutorGrades.filter(g => g.studentId === s.id);
+      const failedCount = studentGrades.filter(g => g.status === 'reprobada').length;
+      const inProgressCount = studentGrades.filter(g => g.status === 'en curso').length;
+      if (failedCount > 0) riskCounts['Riesgo Alto']++;
+      else if (inProgressCount > 0) riskCounts['En Curso']++;
+      else riskCounts['Normal']++;
+    });
+
+    const riskDistribution = [
+      { name: 'Normal',      value: riskCounts['Normal'],      color: 'hsl(142, 71%, 45%)' },
+      { name: 'En Curso',    value: riskCounts['En Curso'],    color: 'hsl(45, 100%, 50%)' },
+      { name: 'Riesgo Alto', value: riskCounts['Riesgo Alto'], color: 'hsl(0, 84%, 60%)' }
+    ];
+
+    const totalTutorTasks = completed + pending + overdue;
+    const complianceRate = totalTutorTasks > 0 ? Math.round((completed / totalTutorTasks) * 100) : 0;
+
+    // Agrupar materias por nombre con estadísticas para TutorSubjectsList
+    const subjectGroups = {};
+    tutorGrades.forEach(g => {
+      if (!subjectGroups[g.subject]) {
+        subjectGroups[g.subject] = { name: g.subject, total: 0, failed: 0 };
+      }
+      subjectGroups[g.subject].total++;
+      if (g.status === 'reprobada') subjectGroups[g.subject].failed++;
+    });
+    const allSubjects = Object.values(subjectGroups).map(sg => ({
+      name: sg.name,
+      totalStudents: sg.total,
+      failRate: sg.total > 0 ? Math.round((sg.failed / sg.total) * 100) : 0
+    }));
 
     res.json({
       totalStudents,
@@ -144,7 +197,9 @@ const getDashboardStats = async (req, res) => {
       failedSubjectsDistribution,
       performanceEvolution,
       gradeDistribution,
-      complianceRate: allTasks.length > 0 ? Math.round((completed / allTasks.length) * 100) : 0
+      riskDistribution,
+      complianceRate,
+      allSubjects
     });
   } catch (error) {
     console.error('Error al obtener stats:', error);
@@ -159,6 +214,8 @@ const getStudentsList = async (req, res) => {
     }
 
     let students = await DB.getAllStudents();
+
+    // Filtrar solo los alumnos activos de ESTE tutor
     students = students.filter(s => s.tutorId === req.user.id && s.status === 'active');
     const allGrades = await getSynthesizedGrades();
     const allTasks = await DB.getAllTasks();
