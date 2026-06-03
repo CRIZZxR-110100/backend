@@ -318,13 +318,23 @@ const sendMessage = async (req, res) => {
     const newMsg = await DB.sendMessage(req.user.id, studentId, content);
 
     // Enviar Push Notification al alumno
+    console.log(`[PUSH] Buscando suscripción para studentId: ${studentId}`);
     const sub = await DB.getPushSubscriptionByUserId(studentId);
-    if (sub) {
-      await sendPushNotification(sub, {
-        title: 'Nuevo Mensaje de tu Tutor',
-        body: content,
-        url: '/'
-      });
+
+    if (!sub) {
+      console.warn(`[PUSH] No se encontró suscripción para el alumno ${studentId}. El alumno no ha activado notificaciones.`);
+    } else {
+      console.log(`[PUSH] Suscripción encontrada. Endpoint: ${sub.endpoint?.substring(0, 60)}...`);
+      try {
+        await sendPushNotification(sub, {
+          title: 'Nuevo Mensaje de tu Tutor',
+          body: content,
+          url: '/'
+        });
+        console.log(`[PUSH] Notificación enviada correctamente al alumno ${studentId}`);
+      } catch (pushErr) {
+        console.error(`[PUSH] Error al enviar notificación:`, pushErr.statusCode, pushErr.body || pushErr.message);
+      }
     }
 
     res.status(201).json({ message: 'Mensaje enviado', data: newMsg });

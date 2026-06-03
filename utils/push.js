@@ -11,11 +11,13 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
 
 const sendPushNotification = async (subscription, payload) => {
   if (!subscription) return;
-  try {
-    await webpush.sendNotification(subscription, JSON.stringify(payload));
-  } catch (error) {
-    console.error('Error al enviar push notification:', error);
-  }
+  // Reconstruir el objeto con el formato exacto que espera web-push
+  const pushSub = {
+    endpoint: subscription.endpoint,
+    keys: subscription.keys
+  };
+  // Lanzamos el error para que el llamador lo capture y lo loggee con detalle
+  await webpush.sendNotification(pushSub, JSON.stringify(payload));
 };
 
 module.exports = { sendPushNotification };
