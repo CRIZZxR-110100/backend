@@ -355,8 +355,18 @@ const DB = {
 
   async getPushSubscriptionByUserId(userId) {
     if (useMock) return null;
-    const { data, error } = await supabase.from('push_subscriptions').select('*').eq('user_id', userId).single();
-    if (error && error.code !== 'PGRST116') throw error;
+    // Tomamos la suscripción más reciente del usuario (maybeSingle evita error si hay 0 o varios)
+    const { data, error } = await supabase
+      .from('push_subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error('Error al obtener suscripción push:', error);
+      return null;
+    }
     return data;
   }
 };
