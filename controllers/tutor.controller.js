@@ -1,4 +1,5 @@
 const DB = require('../config/db');
+const { sendPushNotification } = require('../utils/push');
 
 // Helper para emular la antigua tabla de calificaciones finales computando orgánicamente las secuencias
 const getSynthesizedGrades = async () => {
@@ -302,7 +303,6 @@ const getStudentsList = async (req, res) => {
   }
 };
 
-const { sendPushNotification } = require('../utils/push');
 
 const sendMessage = async (req, res) => {
   try {
